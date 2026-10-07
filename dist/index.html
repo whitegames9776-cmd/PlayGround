@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PlayGround — Neon Dash 2D (Desktop)</title>
+<style>
+  :root { color-scheme: dark; --bg:#0b1020; --panel:#141b32; --accent:#22d3ee; --accent2:#f0f; --gold:#fbbf24; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: radial-gradient(1200px 800px at 50% -10%, #1e2a5a 0%, var(--bg) 60%); color:#e2e8f0; min-height:100vh; display:flex; flex-direction:column; align-items:center; }
+  header { width:100%; max-width:1020px; padding:18px 20px 8px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  h1 { font-size:22px; margin:0; letter-spacing:.5px; }
+  h1 span { color:var(--accent); }
+  .badge { font-size:12px; padding:4px 10px; border:1px solid #334155; border-radius:999px; background:#0f172a; color:#94a3b8; }
+  #hud { width:100%; max-width:1020px; padding:8px 20px; display:flex; gap:10px; flex-wrap:wrap; }
+  .stat { flex:1 1 140px; background:var(--panel); border:1px solid #243056; border-radius:12px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; }
+  .stat b { font-size:20px; }
+  .stat small { color:#94a3b8; text-transform:uppercase; letter-spacing:.08em; font-size:11px; }
+  main { width:100%; max-width:1020px; padding:8px 20px 20px; }
+  #wrap { position:relative; background:#070b18; border:1px solid #243056; border-radius:16px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.5); }
+  canvas { display:block; width:100%; height:auto; aspect-ratio:16/10; background:#070b18; touch-action:none; }
+  #overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px; text-align:center; padding:20px; background:rgba(7,11,24,.55); }
+  #overlay.hidden { display:none; }
+  #overlay h2 { margin:0; font-size:34px; text-shadow:0 0 24px var(--accent); }
+  #overlay p { margin:0; max-width:520px; color:#cbd5e1; line-height:1.5; }
+  #startBtn { font-size:18px; font-weight:700; padding:12px 28px; border-radius:999px; border:0; cursor:pointer; color:#04121a; background:linear-gradient(90deg,var(--accent),#a5f3fc); box-shadow:0 0 24px rgba(34,211,238,.6); }
+  #startBtn:hover { filter:brightness(1.1); }
+  footer { width:100%; max-width:1020px; padding:0 20px 28px; color:#94a3b8; font-size:13px; line-height:1.6; }
+  kbd { background:#1e293b; border:1px solid #334155; border-bottom-width:2px; border-radius:6px; padding:1px 7px; font-size:12px; color:#e2e8f0; }
+  #toast { position:absolute; top:12px; left:50%; transform:translateX(-50%); background:#0f172a; border:1px solid #334155; padding:6px 14px; border-radius:999px; font-size:13px; opacity:0; transition:opacity .3s; pointer-events:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PlayGround <span>Neon Dash</span> — 2D Desktop</h1>
+  <div class="badge">Canvas 2D • 60fps • keyboard + touch</div>
+</header>
+<div id="hud" aria-live="polite">
+  <div class="stat"><small>Score</small><b id="score">0</b></div>
+  <div class="stat"><small>Lives</small><b id="lives">♥♥♥</b></div>
+  <div class="stat"><small>Level</small><b id="level">1</b></div>
+  <div class="stat"><small>Time</small><b id="time">0s</b></div>
+</div>
+<main>
+  <div id="wrap">
+    <canvas id="game" width="960" height="600"></canvas>
+    <div id="toast"></div>
+    <div id="overlay">
+      <h2>NEON DASH</h2>
+      <p>Collect <b style="color:var(--gold)">gold orbs</b> to score. Dodge <b style="color:#f472b6">chasers</b>. <br/>Move with <kbd>WASD</kbd> / <kbd>Arrows</kbd> or drag on touch. 3 hits and it's over.</p>
+      <button id="startBtn" type="button">Start Game</button>
+      <div style="font-size:12px;color:#94a3b8">Desktop best: 1440×900 • Mobile scales automatically</div>
+    </div>
+  </div>
+</main>
+<footer>
+  <b style="color:#e2e8f0">How to play (desktop):</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> to move • <kbd>Space</kbd> to dash • <kbd>P</kbd> pause • Collect 10 orbs to level up. Chasers get faster every level.
+  <br/>Built as a single static file in <code>dist/index.html</code> — no build step, no network assets.
+</footer>
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const scoreEl = document.getElementById('score');
+  const livesEl = document.getElementById('lives');
+  const levelEl = document.getElementById('level');
+  const timeEl = document.getElementById('time');
+  const overlay = document.getElementById('overlay');
+  const startBtn = document.getElementById('startBtn');
+  const toast = document.getElementById('toast');
+  let toastT = 0;
+  function showToast(msg){ toast.textContent = msg; toast.style.opacity = '1'; clearTimeout(toastT); toastT = setTimeout(()=>toast.style.opacity='0', 1400); }
+
+  const state = { mode:'menu', score:0, lives:3, level:1, time:0, shake:0, dashCd:0 };
+  const player = { x:W/2, y:H/2, vx:0, vy:0, r:16, dash:0 };
+  const keys = {};
+  let orbs = [], enemies = [], particles = [], stars = [];
+  for (let i=0;i<110;i++) stars.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*2+0.4,v:Math.random()*22+6});
+
+  function spawnOrb(){ orbs.push({x:40+Math.random()*(W-80), y:70+Math.random()*(H-110), r:10, pulse:Math.random()*6.28}); }
+  function spawnEnemy(edge){
+    const speed = 70 + state.level*22 + Math.random()*40;
+    let x,y; const m=30;
+    const side = edge!==undefined?edge:(Math.random()*4|0);
+    if(side===0){x=Math.random()*W;y=-m;} else if(side===1){x=W+m;y=Math.random()*H;} else if(side===2){x=Math.random()*W;y=H+m;} else {x=-m;y=Math.random()*H;}
+    enemies.push({x,y,r:14+Math.random()*8,speed,ang:Math.random()*6.28,wob:Math.random()*6.28});
+  }
+  function reset(levelKeep){
+    state.score = 0; state.lives = 3; state.level = 1; state.time = 0; state.shake=0;
+    player.x=W/2; player.y=H/2; player.vx=0; player.vy=0;
+    orbs=[]; enemies=[]; particles=[];
+    for(let i=0;i<5;i++) spawnOrb();
+    for(let i=0;i<3;i++) spawnEnemy(i);
+    updateHUD();
+  }
+  function updateHUD(){
+    scoreEl.textContent = state.score;
+    livesEl.textContent = '♥'.repeat(Math.max(0,state.lives)) + '·'.repeat(Math.max(0,3-state.lives));
+    livesEl.style.color = state.lives===3 ? '#4ade80' : state.lives===2 ? '#fbbf24' : '#f87171';
+    levelEl.textContent = state.level;
+    timeEl.textContent = Math.floor(state.time)+'s';
+  }
+  function burst(x,y,color,n){
+    for(let i=0;i<n;i++){ const a=Math.random()*6.28, s=60+Math.random()*220;
+      particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:0.6+Math.random()*0.4,t:0,color,r:2+Math.random()*3}); }
+  }
+  addEventListener('keydown', e=>{
+    keys[e.key.toLowerCase()] = true;
+    if(['arrowup','arrowdown','arrowleft','arrowright',' '].includes(e.key.toLowerCase())) e.preventDefault();
+    if(e.key===' ' && state.mode==='playing' && state.dashCd<=0){ player.dash=0.18; state.dashCd=1.1; burst(player.x,player.y,'#22d3ee',14); }
+    if(e.key.toLowerCase()==='p' && state.mode==='playing'){ state.mode='paused'; showToast('Paused — press P to resume'); }
+    else if(e.key.toLowerCase()==='p' && state.mode==='paused'){ state.mode='playing'; }
+    if(e.key==='Enter' && state.mode!=='playing') startGame();
+  });
+  addEventListener('keyup', e=>{ keys[e.key.toLowerCase()] = false; });
+  let touch = null;
+  canvas.addEventListener('pointerdown', e=>{ const r=canvas.getBoundingClientRect(); touch={x:(e.clientX-r.left)/r.width*W, y:(e.clientY-r.top)/r.height*H}; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', e=>{ if(!touch) return; const r=canvas.getBoundingClientRect(); touch.x=(e.clientX-r.left)/r.width*W; touch.y=(e.clientY-r.top)/r.height*H; });
+  canvas.addEventListener('pointerup', ()=>{ touch=null; });
+  canvas.addEventListener('pointercancel', ()=>{ touch=null; });
+
+  function startGame(){
+    reset(); state.mode='playing'; overlay.classList.add('hidden'); showToast('Level 1 — collect the gold!');
+  }
+  startBtn.addEventListener('click', startGame);
+  // expose for capture / debugging
+  window.__neonDash = { state, startGame };
+
+  let last = performance.now();
+  function loop(now){
+    const dt = Math.min(0.033, (now-last)/1000); last = now;
+    // starfield always animates (so menu screenshot is alive)
+    for(const s of stars){ s.y += s.v*dt; if(s.y>H){s.y=-4; s.x=Math.random()*W;} }
+
+    if(state.mode==='playing'){
+      state.time += dt; state.dashCd = Math.max(0, state.dashCd-dt);
+      // movement
+      let ax=0, ay=0;
+      if(keys['a']||keys['arrowleft']) ax-=1;
+      if(keys['d']||keys['arrowright']) ax+=1;
+      if(keys['w']||keys['arrowup']) ay-=1;
+      if(keys['s']||keys['arrowdown']) ay+=1;
+      if(touch){ const dx=touch.x-player.x, dy=touch.y-player.y, d=Math.hypot(dx,dy); if(d>8){ ax=dx/d; ay=dy/d; } }
+      const spd = player.dash>0 ? 620 : 340;
+      player.dash = Math.max(0, player.dash-dt);
+      player.vx += (ax*spd - player.vx)*Math.min(1,dt*10);
+      player.vy += (ay*spd - player.vy)*Math.min(1,dt*10);
+      player.x = Math.max(20, Math.min(W-20, player.x+player.vx*dt));
+      player.y = Math.max(50, Math.min(H-20, player.y+player.vy*dt));
+      // orbs
+      for(const o of orbs) o.pulse += dt*4;
+      for(let i=orbs.length-1;i>=0;i--){ const o=orbs[i]; if(Math.hypot(o.x-player.x,o.y-player.y) < o.r+player.r){ orbs.splice(i,1); state.score+=10; burst(o.x,o.y,'#fbbf24',12); spawnOrb(); if(state.score%100===0){ state.level++; for(let k=0;k<2;k++) spawnEnemy(); showToast('Level '+state.level+' — faster!'); } } }
+      if(orbs.length<5) spawnOrb();
+      // enemies chase with wobble
+      for(const e of enemies){
+        e.wob += dt*3;
+        const dx=player.x-e.x, dy=player.y-e.y, d=Math.hypot(dx,dy)||1;
+        const wob = Math.sin(e.wob)*0.5;
+        const ca=Math.cos(wob)*0.3, sa=Math.sin(wob)*0.3;
+        const nx=(dx/d*ca - dy/d*sa), ny=(dx/d*sa + dy/d*ca);
+        e.x += nx*e.speed*dt; e.y += ny*e.speed*dt;
+        e.ang += dt*2;
+      }
+      if(Math.random()<dt*(0.4+state.level*0.25) && enemies.length<4+state.level*2) spawnEnemy();
+      // collisions
+      for(let i=enemies.length-1;i>=0;i--){ const e=enemies[i]; if(Math.hypot(e.x-player.x,e.y-player.y) < e.r+player.r-4){
+        enemies.splice(i,1); state.lives--; state.shake=0.35; burst(player.x,player.y,'#f472b6',22); updateHUD();
+        if(state.lives<=0){ state.mode='over'; overlay.classList.remove('hidden'); overlay.querySelector('h2').textContent='GAME OVER'; overlay.querySelector('p').innerHTML='Score <b>'+state.score+'</b> • survived <b>'+Math.floor(state.time)+'s</b> • level <b>'+state.level+'</b><br/>Press Enter or click to play again.'; startBtn.textContent='Play Again'; }
+        else { showToast('Hit! ' + state.lives + ' lives left'); }
+        break;
+      }}
+      if(((state.time*10)|0)%10===0) updateHUD();
+    } else if(state.mode==='menu'){
+      // idle drift for lively screenshot
+      player.x = W/2 + Math.sin(now/900)*120; player.y = H/2 + Math.cos(now/1100)*90;
+      if(enemies.length<4 && Math.random()<0.02) spawnEnemy();
+      for(const e of enemies){ e.x += Math.sin(now/1000+e.wob)*0.6; e.y += 0.4; if(e.y>H+40){e.y=-30; e.x=Math.random()*W;} }
+      if(orbs.length<6 && Math.random()<0.05) spawnOrb();
+    }
+    for(let i=particles.length-1;i>=0;i--){ const p=particles[i]; p.t+=dt; if(p.t>p.life){particles.splice(i,1); continue;} p.x+=p.vx*dt; p.y+=p.vy*dt; p.vx*=0.98; p.vy*=0.98; }
+    render(now/1000);
+    requestAnimationFrame(loop);
+  }
+
+  function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+  function render(t){
+    ctx.save();
+    if(state.shake>0){ state.shake-=1/60; ctx.translate((Math.random()-0.5)*10*state.shake*3,(Math.random()-0.5)*10*state.shake*3); }
+    // bg
+    const g = ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#0b1020'); g.addColorStop(1,'#070b18'); ctx.fillStyle=g; ctx.fillRect(-20,-20,W+40,H+40);
+    ctx.strokeStyle='rgba(34,211,238,.12)'; ctx.lineWidth=1;
+    for(let x=0;x<W;x+=48){ ctx.beginPath(); ctx.moveTo(x,40); ctx.lineTo(x,H); ctx.stroke(); }
+    for(let y=40;y<H;y+=48){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+    // top bar
+    ctx.fillStyle='rgba(20,27,50,.9)'; ctx.fillRect(0,0,W,44);
+    ctx.fillStyle='#22d3ee'; ctx.font='700 15px system-ui'; ctx.fillText('◉ NEON DASH  — desktop 2D', 16, 28);
+    ctx.fillStyle='#94a3b8'; ctx.font='13px system-ui'; ctx.textAlign='right'; ctx.fillText('score '+state.score+'   lives '+state.lives+'   lvl '+state.level, W-16, 28); ctx.textAlign='left';
+    // stars
+    for(const s of stars){ ctx.globalAlpha=0.5; ctx.fillStyle='#93c5fd'; ctx.fillRect(s.x,s.y,s.s,s.s); } ctx.globalAlpha=1;
+    // orbs
+    for(const o of orbs){ const p=1+Math.sin(o.pulse)*0.15; ctx.save(); ctx.translate(o.x,o.y); ctx.scale(p,p);
+      const rg=ctx.createRadialGradient(0,0,2,0,0,16); rg.addColorStop(0,'#fef3c7'); rg.addColorStop(.4,'#fbbf24'); rg.addColorStop(1,'rgba(251,191,36,0)');
+      ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(0,0,16,0,7); ctx.fill();
+      ctx.fillStyle='#fbbf24'; ctx.beginPath(); ctx.arc(0,0,o.r-2,0,7); ctx.fill();
+      ctx.fillStyle='#fff7ed'; ctx.beginPath(); ctx.arc(-3,-3,3,0,7); ctx.fill(); ctx.restore(); }
+    // enemies
+    for(const e of enemies){ ctx.save(); ctx.translate(e.x,e.y); ctx.rotate(e.ang);
+      ctx.shadowColor='#f0f'; ctx.shadowBlur=18; ctx.fillStyle='#ec4899';
+      ctx.beginPath(); for(let i=0;i<5;i++){ const a=i/5*6.283; const r=i%2?e.r*0.55:e.r; ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r);} ctx.closePath(); ctx.fill();
+      ctx.shadowBlur=0; ctx.fillStyle='#0b1020'; ctx.beginPath(); ctx.arc(0,0,5,0,7); ctx.fill(); ctx.restore(); }
+    // player
+    const dashing = player.dash>0;
+    ctx.save(); ctx.translate(player.x,player.y);
+    if(dashing){ ctx.strokeStyle='rgba(34,211,238,.5)'; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(0,0,player.r+8,0,7); ctx.stroke(); }
+    ctx.shadowColor='#22d3ee'; ctx.shadowBlur=22;
+    const ang = Math.atan2(player.vy,player.vx||0.001);
+    ctx.rotate(Math.abs(player.vx)+Math.abs(player.vy) > 20 ? ang : t*0.8);
+    ctx.fillStyle='#22d3ee'; ctx.beginPath(); ctx.moveTo(18,0); ctx.lineTo(-12,12); ctx.lineTo(-6,0); ctx.lineTo(-12,-12); ctx.closePath(); ctx.fill();
+    ctx.restore(); ctx.shadowBlur=0;
+    // particles
+    for(const p of particles){ ctx.globalAlpha=1-p.t/p.life; ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7); ctx.fill(); } ctx.globalAlpha=1;
+    // dash cooldown bar
+    if(state.mode==='playing'){ ctx.fillStyle='rgba(148,163,184,.25)'; roundRect(16,H-22,160,8,4); ctx.fill(); ctx.fillStyle='#22d3ee'; const w=160*(1-state.dashCd/1.1); roundRect(16,H-22,Math.max(0,w),8,4); ctx.fill(); ctx.fillStyle='#94a3b8'; ctx.font='12px system-ui'; ctx.fillText('SPACE = dash', 184, H-14); }
+    ctx.restore();
+  }
+  reset(); state.mode='menu'; updateHUD();
+  // keep overlay visible in menu with original copy
+  overlay.querySelector('h2').textContent='NEON DASH';
+  requestAnimationFrame(loop);
+  setInterval(()=>{ if(state.mode==='playing') updateHUD(); }, 500);
+})();
+</script>
+</body>
+</html>
